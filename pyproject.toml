@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "malecns"
+version = "0.2.0"
+description = "Embodied MaleCNS v1.0 simulation: full connectome, Arbor, MuJoCo, Rerun"
+readme = "GOAL.md"
+requires-python = ">=3.11"
+authors = [{ name = "MaleCNS project" }]
+
+[project.scripts]
+malecns = "malecns.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "gpu: tests that require a working NVIDIA GPU and Arbor CUDA context",
+    "data: tests that require the local MaleCNS v1.0 bulk dataset",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+ignore = ["E501"]
