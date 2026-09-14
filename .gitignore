@@ -1,0 +1,23 @@
+# MaleCNS datasets
+data/raw/
+data/cache/
+
+# Runtime
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.venv/
+
+# Build
+build/
+dist/
+*.egg-info/
