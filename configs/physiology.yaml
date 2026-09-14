@@ -1,0 +1,90 @@
+cv_policy:
+  max_extent_um:
+    value: 10.0
+    provenance: ASSUMED
+    source: >
+      Arbor default is one control volume per branch, which is too coarse for
+      branched fly neurites. A 10 µm max CV extent is an explicit numerical
+      policy (not a measured electrotonic length). Gouwens & Wilson 2009 report
+      Drosophila PN space constants of tens to hundreds of micrometers; 10 µm
+      CVs resolve sub-branch voltage gradients without claiming that length as
+      data.
+
+passive:
+  membrane_capacitance_F_per_m2:
+    value: 0.01
+    provenance: LITERATURE_DERIVED
+    source: "1 µF/cm² specific capacitance (Hille). Used as the default in fly cable models including Gouwens & Wilson 2009."
+  axial_resistivity_ohm_cm:
+    value: 265.0
+    provenance: LITERATURE_DERIVED
+    source: "Within the 150–300 Ω·cm range used for Drosophila neurites (Gouwens & Wilson 2009; typical Rall-type cable models). Not measured for MaleCNS tissue."
+  leak_conductance_S_per_cm2:
+    value: 5.0e-5
+    provenance: ASSUMED
+    source: "g_pas = Cm / tau_m with Cm = 1 µF/cm² and tau_m ≈ 20 ms, a mid-range Drosophila membrane time constant (Gouwens & Wilson 2009)."
+  leak_reversal_mV:
+    value: -65.0
+    provenance: ASSUMED
+    source: "Resting potential near -65 mV is typical for fly central neurons in electrophysiology; MaleCNS does not measure Vm."
+  initial_voltage_mV:
+    value: -65.0
+    provenance: ASSUMED
+    source: "Initialized at leak reversal. Not a measured MaleCNS resting potential."
+  temperature_K:
+    value: 298.15
+    provenance: ASSUMED
+    source: "25 °C laboratory temperature. Drosophila is poikilothermic; this is not a connectome measurement."
+
+spiking:
+  mechanism:
+    value: threshold_detector
+    provenance: ASSUMED
+    source: >
+      MaleCNS does not provide ion-channel densities. Spikes are detected with an
+      Arbor threshold detector rather than a fitted Hodgkin–Huxley or fly-specific
+      Na/K model. This is an explicit modeling assumption, not measured channels.
+  threshold_mV:
+    value: -45.0
+    provenance: LITERATURE_DERIVED
+    source: "Fly central-neuron spike threshold is typically around -40 to -50 mV (Gouwens & Wilson 2009 and related PN recordings)."
+  detector_location:
+    value: soma_proximal
+    provenance: ASSUMED
+    source: "Detector placed at (location 0 0), the proximal end of branch 0 after SWC import. Not a measured axon initial segment coordinate."
+
+synapses:
+  tau_ms:
+    acetylcholine: {value: 2.0, provenance: LITERATURE_DERIVED, source: "Fast nAChR EPSCs in Drosophila are millisecond-scale (Olsen & Wilson; typical 1–5 ms)."}
+    gaba: {value: 5.0, provenance: LITERATURE_DERIVED, source: "GABAergic IPSCs in fly CNS are slower than nAChR; 5 ms is a mid literature value, not a MaleCNS measurement."}
+    glutamate: {value: 4.0, provenance: ASSUMED, source: "Many Drosophila CNS glutamate synapses are GluCl inhibitory; kinetics not measured in MaleCNS. 4 ms is an explicit placeholder in the GABA/ACh range."}
+    histamine: {value: 3.0, provenance: LITERATURE_DERIVED, source: "Histaminergic photoreceptor synapses onto lamina neurons are fast inhibitory (Hardie)."}
+    unknown: {value: 2.0, provenance: ASSUMED, source: "Unclassified transmitter uses ACh-like tau. Flagged, not measured."}
+  reversal_mV:
+    acetylcholine: {value: 0.0, provenance: LITERATURE_DERIVED, source: "nAChR reversal near 0 mV in fly neurons."}
+    gaba: {value: -70.0, provenance: LITERATURE_DERIVED, source: "GABA_A / GABA_B-like inhibition; -70 mV is a conventional chloride reversal, not measured per MaleCNS synapse."}
+    glutamate: {value: -70.0, provenance: ASSUMED, source: "Treated as inhibitory GluCl in fly CNS (Liu & Wilson 2006 and later). Excitatory iGluR at NMJ is not used as the CNS default."}
+    histamine: {value: -70.0, provenance: LITERATURE_DERIVED, source: "Histamine-gated chloride channels at photoreceptor synapses are inhibitory."}
+    unknown: {value: 0.0, provenance: ASSUMED, source: "Unknown NT treated as weakly excitatory ACh-like; not a measurement."}
+  unitary_weight:
+    value: 0.01
+    provenance: ASSUMED
+    source: "Arbor expsyn event weight (conductance scale). Unitary connectome synapses do not include measured PSPs. One published partner row = one explicit synapse at this weight."
+  min_delay_ms:
+    value: 0.1
+    provenance: ASSUMED
+    source: "Numerical lower bound so Arbor delays stay positive. Not a measured synaptic delay."
+  synaptic_delay_ms:
+    value: 0.5
+    provenance: ASSUMED
+    source: "Chemical-synapse delay added to conduction time. Typical sub-millisecond to 1 ms range; not measured in MaleCNS."
+  conduction_velocity_m_per_s:
+    value: 0.3
+    provenance: LITERATURE_DERIVED
+    source: "Drosophila axon conduction is often 0.1–1 m/s. 0.3 m/s is a mid-range value, not a per-neuron measurement."
+
+mapping:
+  residual_limit_um:
+    value: 10.0
+    provenance: ASSUMED
+    source: "Points farther than 10 µm from the nearest cable are flagged pathological. They are still placed at the closest location and counted; they are not dropped."
