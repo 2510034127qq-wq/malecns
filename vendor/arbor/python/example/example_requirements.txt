@@ -1,0 +1,5 @@
+# pip requirements file
+numpy
+LFPykit>=0.3
+pandas
+seaborn

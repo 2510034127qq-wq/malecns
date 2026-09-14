@@ -1,0 +1,110 @@
+<div class="diag-cont" style="color: #202020; max-width: 100%; margin-left: 0%;">
+    <div id="recipe_src">Recipe
+        <div>Cell descriptions
+            <div>
+                gid 1</br>
+                type <code>lif_cell</code></br>
+                description</br>
+                ...
+            </div>
+            <div>...</div>
+            <div>
+                gid 37</br>
+                type <code>cable_cell</code></br>
+                description
+                <ul>
+                    <li>Morphology</li>
+                    <li>Ion channels</li>
+                    <li>Connection sites</li>
+                    <li>Labels</li>
+                </ul>
+            </div>
+        </div>
+        <div>Cell kinds
+            <div>gid 1 <code>lif_cell</code></div>
+            <div>...</div>
+            <div>gid 37 <code>cable_cell</code></div>
+        </div>
+        <div>...</div>
+    </div>
+
+    <div class="diag-col" style="width: auto;">
+        <div class="diag-right">
+            Simulator: kind of <code>gid=1</code>?
+        </div>
+        <div class="diag-left">
+            Recipe: <code>lif_cell</code>.
+        </div>
+        <div class="diag-right2">
+            ...
+        </div>
+        <div class="diag-right">
+            Simulator: kind of <code>gid=37</code>?
+        </div>
+        <div class="diag-left">
+            Recipe: <code>cable_cell</code>.
+        </div>
+        <div class="diag-right2">
+            Group implementations for <code>lif_cell</code>, <code>cable_cell</code></br>
+            Domain decomposition: <code>group-0</code>, <code>group-1</code>
+        </div>
+
+        <div class="diag-right">
+            Simulator requests cell description of <code>gid=37</code>
+        </div>
+        <div class="diag-left">
+            Recipe: <code>morphology, ...</code>.
+        </div>
+        <div class="diag-right2">
+            Simulator:</br>
+            <code>group-0</code> make <code>cable_cell</code></br>
+            <code>group-1</code> make <code>lif_cell</code>
+        </div>
+        <div class="diag-right">
+            Simulator:</br>
+            <code>group-0</code> simulate for <code>dt</code>
+            </br>
+            <code>group-1</code> simulate for <code>dt</code>
+        </div>
+    </div>
+    <div>Simulation
+        <div id="recipe_dst">Recipe</div>
+        <div id="conc_src">Context
+            <div>
+                12 threads
+            </div>
+            <div>
+                1 GPU
+            </div>
+        </div>
+        <div id="domdec_src">Domain decomposition
+            <div>
+                <code>group-0</code></br>
+                kind: <code>cable</code></br>
+                hardware: 1 GPU</br>
+                gids: <code>37, ...</code>
+            </div>
+            <div>
+                <code>group-1</code></br>
+                kind: <code>lif</code></br>
+                hardware: 12 threads</br>
+                gids: <code>1, ...</code>
+            </div>
+            <div>
+                ...
+            </div>
+        </div>
+    </div>
+</div>
+<div class="diag-caption">
+    An illustration of the cell-specific portion of the recipe, and how it is
+    used during the lifetime of the simulation: the simulation object will,
+    depending on its configuration, query the recipe for the neuroscientific
+    components it describes. This demonstration also show why the recipe separates
+    cell descriptions from cell types. The latter is, as you might expect,
+    shorthand, and is used in the allocation of the cell to a particular cell group.
+    A cell group implementation is a handler for a certain kind of cell, and Arbor
+    comes with these for all it's included cell kinds. However, users can develop
+    their own specialized cell group implementations. More on that in the internal
+    developer documentation.
+</div>

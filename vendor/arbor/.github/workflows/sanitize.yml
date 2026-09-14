@@ -1,0 +1,105 @@
+name: Sanitize
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore: 'doc/**'
+
+  pull_request:
+    branches: [ master ]
+
+  schedule:
+    - cron: '0 2 * * 0' # run at 2 AM every sunday
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: write
+
+jobs:
+  build:
+    name: "Sanitize"
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name:      ["Sanitize"]
+        sanitizer: ["address", "undefined", "thread"]
+        simd:      ["ON", "OFF"]
+    env:
+        CC:           clang-18
+        CXX:          clang++-18
+        ASAN_OPTIONS: detect_leaks=1
+    steps:
+      - name: Get build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+      - name: Set up cmake
+        uses: jwlawson/actions-setup-cmake@v2.2
+        with:
+          cmake-version: 4.x
+      - name: Clone w/ submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      # figure out vector extensions for ccache key
+      - name: Check vector extensions
+        run: |
+          HAS_AVX512F=$([[ $(lscpu | grep "avx512f" | wc -l) -eq 1 ]] && echo "_avx512f" || echo "")
+          HAS_AVX2=$([[ $(lscpu | grep "avx2" | wc -l) -eq 1 ]] && echo "_avx2" || echo "")
+          HAS_FMA=$([[ $(lscpu | grep "fma" | wc -l) -eq 1 ]] && echo "_fma" || echo "")
+          HAS_AVX=$([[ $(lscpu | grep "avx" | wc -l) -eq 1 ]] && echo "_avx" || echo "")
+          VECTOR_EXTENSIONS=${HAS_AVX512F}${HAS_AVX2}${HAS_FMA}${HAS_AVX}
+          echo "VECTOR_EXTENSIONS=$VECTOR_EXTENSIONS" >> $GITHUB_ENV
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: sanitize-${{ env.CXX }}-${{ matrix.sanitizer }}-${{ env.VECTOR_EXTENSIONS }}
+      - name: Build arbor
+        run: |
+          export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+          mkdir build
+          cd build
+          export SAN="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer"
+          cmake .. -GNinja -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -DCMAKE_BUILD_TYPE=debug -DCMAKE_CXX_FLAGS="$SAN" -DCMAKE_C_FLAGS="$SAN" -DCMAKE_EXE_LINKER_FLAGS="$SAN" -DCMAKE_MODULE_LINKER_FLAGS="$SAN" -DARB_BUILD_PYTHON_STUBS=OFF -DARB_WITH_ASSERTIONS=ON -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_C_COMPILER=$CC -DARB_VECTORIZE=${{ matrix.simd }} -DARB_WITH_MPI=OFF -DARB_WITH_PYTHON=ON -DPython3_EXECUTABLE=`which python`
+          ninja -j4 -v tests examples pyarb
+          cd -
+      - name: Run unit tests
+        run: |
+          build/bin/unit --gtest_filter=-*DeathTest 2>&1 | tee output.log
+          build/bin/unit-modcc 2>&1 | tee -a output.log
+        shell: bash
+      - name: Run examples
+        run: scripts/run_cpp_examples.sh 2>&1 | tee -a output.log
+        shell: bash
+      - name: Ouput File
+        if: ${{ failure() && github.event_name == 'schedule' }}
+        run: |
+          FENCE='```'
+          HEADER="$(cat << EOF
+          <details>
+          
+          <summary>output from test runs</summary>
+          
+          ${FENCE}
+          EOF
+          )"
+          FOOTER="$(cat << EOF
+          ${FENCE}
+          
+          </details>
+          EOF
+          )"
+          echo "${HEADER}" > issue.md
+          cat output.log >> issue.md
+          echo "${FOOTER}" >> issue.md
+          echo -e "\nSee also the [corresponding workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n" >> issue.md
+      - name: Create Issue From File
+        if: ${{ failure() && github.event_name == 'schedule' }}
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: '[AUTOMATED] Sanitize checks failed'
+          content-filepath: ./issue.md
+          labels: |
+            automated issue

@@ -2,6 +2,8 @@
 
 当前环境、依赖、Arbor CUDA/MPI、MaleCNS v1.0 全量数据、全部 SWC skeleton、逐突触表、MuJoCo 等均已准备完成。不要重新安装环境、重新下载数据，也不要把项目重构成缩水版。
 
+最终统一可视化平台固定为 Rerun Viewer，使用 Rerun SDK 记录并展示 MuJoCo 世界、MaleCNS 3D morphology、左右复眼图像、神经/感觉/运动 telemetry 与统一时间轴。Octarine 保留为神经 morphology 的专业调试/核查工具，不作为最终统一工作台。若当前 malecns 环境尚未安装 rerun-sdk，只补装这一项，不得借此重装或替换其余已工作的环境。
+
 现在直接自主实现最终目标：
 
 【最终目标】
@@ -233,15 +235,15 @@ motor
 五、最终可视化
 ==================================================
 
-做成一个统一可运行的数字果蝇程序/工作台。
+最终统一可视化平台使用 Rerun Viewer，不自行重造完整 PySide/Web GUI，除非实际验证后确认 Rerun 无法满足某个必要交互能力。
 
-主界面至少同时提供：
+Rerun Viewer 作为最终用户工作台，使用 Blueprint 固定主要布局，并共享统一 simulation timeline。至少同时提供：
 
 A. MuJoCo 3D World
-- 显示果蝇身体
-- 环境
-- 实时运动
+- 将果蝇身体、环境 mesh、transform、障碍物、光源/刺激源等记录到 Rerun 3D scene
+- 显示果蝇实时位置、姿态和运动
 - 可自由观察
+- 必要时同时记录 MuJoCo camera render，但不要把 MuJoCo 独立 Viewer 作为最终主界面
 
 B. MaleCNS 3D
 - 使用真实 morphology
@@ -249,13 +251,15 @@ B. MaleCNS 3D
 - neural activity overlay
 - spike / Vm / activity 可视化
 - 支持按 cell type / neuropil / activity 筛选
+- morphology 优先以适合 Rerun Spatial3DView 的 line/point geometry 记录
+- Octarine 用于单独核查复杂 morphology、数据导入和神经元结构，不要求最终用户在两个 Viewer 间切换
 
 C. Left eye / Right eye
-- 实时显示果蝇自己实际接收到的视觉输入
+- 在 Rerun 中实时显示果蝇自己实际接收到的左右视觉输入
 - 最好同时提供 compound-eye sampled representation
 
 D. Sensory / motor telemetry
-例如：
+使用 Rerun TimeSeries / timeline 展示，例如：
 - visual input activity
 - olfactory activity
 - mechanosensory activity
@@ -264,12 +268,13 @@ D. Sensory / motor telemetry
 - wing L/R drive
 - six-leg motor activity
 - body velocity/orientation
+- simulation biological time / wall-clock time / realtime ratio
 
-需要支持：
+最终工作台需要支持或提供对应能力：
 
-- pause
-- resume
-- simulation speed
+- timeline pause / resume / seek / replay
+- live simulation pause / resume
+- simulation speed control
 - neuron selection
 - neuron search by body ID
 - inspect one neuron
@@ -279,6 +284,8 @@ D. Sensory / motor telemetry
 - inspect neurotransmitter prediction
 - locate selected synapse in 3D
 - follow activity from sensory pathway toward motor pathway
+
+Rerun 原生 timeline/replay 能力优先直接使用。若 live simulator 的 pause/resume/speed 无法直接由 Rerun Viewer 控制，则只实现一个最小充分的控制桥，不因此另造完整 GUI 框架。
 
 单神经元视图应尽可能显示：
 
@@ -297,6 +304,12 @@ Viewer 使用 LOD。
 近景选择神经元时再显示真实 individual synapses。
 
 显示层可以抽样/LOD，但 simulation/data model 不允许因此丢失 synapses。
+
+Rerun 日志本身也必须控制数据量：
+- 静态 morphology / mesh 只记录一次或按需加载
+- 动态状态按合理频率记录
+- 不允许每一帧重复发送全部 morphology 或全部 synapses
+- 不允许为了可视化生成另一份无必要的全量 connectome 副本
 
 ==================================================
 六、架构
@@ -321,18 +334,41 @@ tests/
 
 Arbor 负责神经模拟。
 MuJoCo 负责 body/environment physics。
+Rerun SDK + Rerun Viewer 负责最终统一可视化、时间轴、记录与回放。
+Octarine 只作为神经 morphology 的专业调试/核查工具。
 Viewer 与 simulation 解耦。
-必要时使用现有 pyzmq/msgpack 做低开销状态传输，但如果单进程/共享内存更简单，就优先简单方案。
 
-不要引入数据库、微服务、Web 后端等没有实际需要的东西。
+优先直接从运行进程向 Rerun SDK 记录状态。如果模拟、物理和可视化确实需要分进程，再使用现有 pyzmq/msgpack 做低开销状态传输；如果单进程/共享内存更简单，就优先简单方案。
+
+不要引入数据库、微服务、Web 后端、自制完整桌面 GUI 等没有实际需要的东西。
 
 大数据读取：
 - Arrow memory map
 - chunking
 - compact indexes
+- lazy / cell-centric generation
 - 必要缓存
 
 禁止无理由把 10~20 GB 数据完整复制两三份。
+
+【硬件与性能策略】
+
+全数据语义并不要求整个仿真都驻留在 GPU 上。
+
+当前可用硬件包括：
+- 64 GB system RAM
+- RTX 5060 8 GB VRAM
+- 多核 CPU
+- Arbor CUDA / multicore / MPI 能力
+
+不要为了适应 8 GB 显存而修剪神经元、形态、突触或感觉模态。
+
+先测量实际 RAM、VRAM、模型构建峰值和 simulation throughput，再决定执行方式。优先尝试 GPU 加速；如果显存不足，使用 Arbor 支持的 multicore CPU 执行、合理的 context/domain decomposition、lazy recipe、紧凑表示、分块/按 cell 构建，必要时使用 C++ model-construction path 降低 Python 构建开销。
+
+仅 GPU OOM 不是缩减 MaleCNS 模型的理由。
+只有在完整模型经过实际测量后确认 64 GB RAM / 8 GB VRAM / 当前 CPU 均无法在保持语义的工程方案下完成实例化或推进 simulation time，才把它作为硬件 blocker 报告。
+
+可视化资源与神经模拟资源分开考虑。Rerun 必须使用 LOD、静态数据复用和合理的动态采样频率，不能因为 Viewer 占用显存/内存而迫使神经模型缩水。
 
 ==================================================
 七、科研真实性
@@ -436,20 +472,25 @@ body movement 能改变下一时刻 sensory input。
 
 允许为了 debug 用少量数据，但最终验收必须回到全部 MaleCNS。
 
+
 ==================================================
 十、最终成果
 ==================================================
 
-最终我应该能够启动一个程序，看到：
+最终我应该能够通过一个统一启动入口运行系统，并在 Rerun Viewer 中看到同一时间轴上的完整工作台。
 
-左侧：
+Blueprint 默认布局至少包括：
+
+左侧/主 3D 视图：
 真实运行的 MuJoCo 数字果蝇和环境。
 
-右侧：
+右侧/第二 3D 视图：
 完整 MaleCNS 的 3D morphology 与实时活动。
 
 下方/其他面板：
-左右复眼输入、感觉状态、motor outputs、身体 telemetry。
+左右复眼输入、感觉状态、motor outputs、身体 telemetry、simulation timeline / replay。
+
+Octarine 可以作为额外的 morphology 调试工具，但不应成为最终成果必须同时打开的第二套主界面。
 
 果蝇能够在环境里：
 
@@ -477,5 +518,3 @@ body movement 能改变下一时刻 sensory input。
 不要预设果蝇应该做什么。
 
 给完整 MaleCNS 一个尽可能有根据的身体和感觉系统，让行为从真实 connectome + 当前有依据的神经动力学 + 物理环境闭环中自然产生。
-
-从现在开始直接实施。

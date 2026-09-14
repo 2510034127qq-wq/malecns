@@ -1,0 +1,57 @@
+#pragma once
+
+#include <ostream>
+#include <vector>
+
+#include <arbor/export.hpp>
+#include <arbor/context.hpp>
+
+namespace arb {
+
+namespace profile {
+
+// type used for region identifiers
+using region_id_type = std::size_t;
+
+// type that saves the state of nested timers
+using timer_stack = std::vector<std::uint32_t>;
+
+// The results of a profiler run.
+struct profile {
+    // the name of each profiled region.
+    std::vector<std::string> names;
+
+    // the timer stacks
+    std::vector<timer_stack> stacks{};
+
+    // the number of times each region was called.
+    std::vector<std::size_t> counts;
+
+    // the accumulated time spent in each region.
+    std::vector<double> times;
+
+    // the number of threads for which profiling information was recorded.
+    std::size_t num_threads;
+
+    // the wall time between profile_start() and profile_stop().
+    double wall_time;
+};
+
+ARB_ARBOR_API void profiler_clear();
+ARB_ARBOR_API void profiler_initialize(context ctx);
+ARB_ARBOR_API void profiler_enter(std::size_t region_id);
+ARB_ARBOR_API void profiler_leave(std::size_t region_id);
+ARB_ARBOR_API void task_started(const timer_stack& timer_stack);
+ARB_ARBOR_API void task_stopped(const timer_stack& timer_stack);
+ARB_ARBOR_API const timer_stack& get_current_timer_stack();
+
+ARB_ARBOR_API profile profiler_summary();
+
+ARB_ARBOR_API std::ostream& print_profiler_summary(std::ostream&, double limit=0.0);
+ARB_ARBOR_API std::size_t profiler_region_id(const std::string& name);
+
+ARB_ARBOR_API std::ostream& operator<<(std::ostream&, const profile&);
+
+} // namespace profile
+} // namespace arb
+

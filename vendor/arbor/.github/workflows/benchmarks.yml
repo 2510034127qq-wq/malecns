@@ -1,0 +1,58 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [ master ]
+    paths-ignore: 'doc/**'
+
+jobs:
+  build:
+    name: "Benchmarks"
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+    env:
+        CC:  gcc-12
+        CXX: g++-12
+    steps:
+      - name: Get build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+      - name: Set up cmake
+        uses: jwlawson/actions-setup-cmake@v2.2
+        with:
+          cmake-version: 4.x
+      - name: Clone w/ submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      # figure out vector extensions for ccache key
+      - name: Check vector extensions
+        run: |
+          HAS_AVX512F=$([[ $(lscpu | grep "avx512f" | wc -l) -eq 1 ]] && echo "_avx512f" || echo "")
+          HAS_AVX2=$([[ $(lscpu | grep "avx2" | wc -l) -eq 1 ]] && echo "_avx2" || echo "")
+          HAS_FMA=$([[ $(lscpu | grep "fma" | wc -l) -eq 1 ]] && echo "_fma" || echo "")
+          HAS_AVX=$([[ $(lscpu | grep "avx" | wc -l) -eq 1 ]] && echo "_avx" || echo "")
+          VECTOR_EXTENSIONS=${HAS_AVX512F}${HAS_AVX2}${HAS_FMA}${HAS_AVX}
+          echo "VECTOR_EXTENSIONS=$VECTOR_EXTENSIONS" >> $GITHUB_ENV
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: benchmarks-${{ env.CXX }}-${{ env.VECTOR_EXTENSIONS }}
+      - name: Build arbor
+        run: |
+          mkdir build
+          cd build
+          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_C_COMPILER=$CC -DARB_WITH_MPI=OFF
+          ninja -j4 ubenches
+          cd -
+      - name: Run benchmarks
+        run: |
+          build/bin/accumulate_functor_values
+          build/bin/default_construct
+          build/bin/event_setup
+          build/bin/event_binning
+          build/bin/fvm_discretize
+          build/bin/mech_vec
+          build/bin/task_system

@@ -60,6 +60,11 @@ Verified core runtime:
 - ruff
 - 64 GB system RAM, 8 GB VRAM
 
+Final visualization target:
+- Rerun Viewer is the unified end-user visualization/workbench.
+- NAVIS/Octarine remains available for specialist morphology inspection/debugging, not as the required final main UI.
+- If `rerun-sdk` is not yet installed in `malecns`, installing that single package with `python -m pip install rerun-sdk` is allowed. Do not use this as a reason to recreate or reinstall the environment.
+
 The Arbor v0.12.2 source tree currently contains a CMake 4 compatibility patch in the top-level `CMakeLists.txt`:
 
 `cmake_policy(SET CMP0146 OLD)`
@@ -83,7 +88,7 @@ Never use bare `pip ...` for project dependency changes.
 
 Repository root: `~/malecns`
 
-Expected layout:
+Expected/target layout; create missing implementation directories as needed:
 
 ```text
 malecns/
@@ -121,12 +126,46 @@ Use the existing libraries rather than reimplementing solved infrastructure:
 
 - PyArrow/Polars: bulk Feather ingestion and chunked table processing.
 - NAVIS: morphology inspection/manipulation where useful.
+- Octarine: specialist morphology inspection/debugging.
 - Arbor: morphology-aware cable-cell simulation, CV discretization, mechanisms, event delivery, GPU/MPI execution.
 - MuJoCo: fly rigid-body/joint/contact physics and experimental environment.
 - Trimesh: mesh processing when needed.
-- ZeroMQ/msgpack: simulation/viewer/physics process communication if separate processes are used.
+- Rerun SDK + Rerun Viewer: final unified visualization, timeline, recording, replay, 3D world/CNS views, eye images, and telemetry.
+- ZeroMQ/msgpack: simulation/viewer/physics process communication only if separate processes are actually useful.
+
+Prefer the simplest working process topology. If Arbor, MuJoCo, and Rerun can exchange state directly in one process without compromising throughput or isolation, do that. Add ZeroMQ/shared-memory bridges only when measured needs justify them.
+
+Do not build a custom full PySide/Web GUI when Rerun already provides the required visualization/workbench capability. Add only minimal custom controls/bridges for live-simulation functions that Rerun does not natively control.
 
 Do not write a custom cable-equation solver or custom general-purpose physics engine unless a concrete blocker in the chosen libraries is demonstrated.
+
+## Hardware and performance policy
+
+Full-data semantics do not require the entire simulation to reside on the GPU.
+
+Available hardware includes:
+- 64 GB system RAM
+- RTX 5060 with 8 GB VRAM
+- multicore CPU
+- Arbor CUDA / multicore / MPI capabilities
+
+Do not prune neurons, morphology, synapses, or sensory modalities merely to fit 8 GB VRAM.
+
+Measure first:
+- model-construction peak RAM
+- runtime RAM
+- VRAM
+- preprocessing/build time
+- biological simulation time / wall-clock time
+- throughput and bottlenecks
+
+Prefer GPU acceleration where it is actually beneficial. If VRAM is insufficient, use semantics-preserving execution strategies such as Arbor multicore CPU execution, appropriate context/domain decomposition, lazy recipes, compact representations, chunked/cell-centric model construction, and—if Python model-construction overhead becomes the measured blocker—a C++ model-construction path.
+
+GPU OOM alone is not a valid reason to reduce the MaleCNS model.
+
+Only report hardware as a blocker after measuring that the complete model cannot be instantiated or advanced on the available 64 GB RAM / 8 GB VRAM / CPU using reasonable semantics-preserving engineering approaches.
+
+Visualization resource use is separate from neural-model semantics. Rerun must use LOD, static-data reuse, and sensible dynamic logging rates so the viewer does not force the neural model to shrink.
 
 ## Morphology and synapse mapping
 
@@ -175,14 +214,28 @@ MuJoCo handles rigid-body dynamics and contacts. Wing aerodynamics may require c
 
 ## Visualization
 
+Final visualization uses Rerun Viewer as the unified user-facing workbench. Octarine is a specialist morphology debugging/inspection tool and must not be required as a second main window for normal use.
+
 Visualization is not allowed to change or simplify the simulation state.
 
-Use rendering LOD only:
+Use a Rerun Blueprint to organize synchronized views on one simulation timeline. The final workbench should support at least:
+
+- MuJoCo 3D world: fly body, transforms, environment geometry, obstacles/stimuli, and motion.
+- MaleCNS 3D: real morphology with activity overlays and useful filtering/selection.
+- Left/right eye views: rendered eye input and, where useful, compound-eye sampled representation.
+- Time-series/telemetry: sensory activity, DN/motor signals, wing/leg drive, body state, biological time, wall-clock time, and realtime ratio.
+- Neuron/synapse inspection: body ID, type, ROI/neuropil, transmitter information, morphology, current simulated state, partners, mapped synapses, and selected synapse position.
+
+Use rendering/logging LOD only:
 - whole-CNS view: morphology/activity summaries, not every synapse rendered every frame
 - regional view: active cells/connections
 - single-neuron view: full morphology, mapped synapses, membrane state
 - synapse view: pre/post neuron IDs, location, neuropil, transmitter probabilities, current simulated state
 - embodied view: MuJoCo environment + fly + sensory inputs + CNS activity + motor telemetry synchronized in time
+
+Do not resend static morphology or meshes every frame. Log static geometry once or on demand, and log dynamic state at a measured, reasonable cadence. Do not stream all explicit synapses every frame.
+
+Rerun's native timeline/replay/selection capabilities should be used directly where possible. If live simulation pause/resume/speed cannot be controlled directly through Rerun, implement the smallest sufficient control bridge instead of building a separate full GUI framework.
 
 The full data remain in the simulation even when the viewer displays only a level-of-detail subset.
 
@@ -198,9 +251,9 @@ A task is not complete merely because a small sample works. The project-level ac
 6. Synapses are mapped to the correct neuron morphology with mapping-quality statistics and explicit accounting for any failures.
 7. An Arbor recipe representing the complete modeled network can be instantiated.
 8. The full-network simulation advances simulation time; report wall-clock speed, RAM, VRAM, cell/CV/synapse counts, and any bottleneck.
-9. No silent fallback from GPU to CPU, data dropping, or reduced-network execution is allowed. If a hardware/runtime limit is hit, report it with measurements and optimize the implementation rather than silently changing the scientific target.
+9. No silent execution-mode change, data dropping, or reduced-network execution is allowed. Explicit multicore CPU or mixed hardware execution is allowed and expected when justified by measured VRAM/RAM/performance constraints; record the chosen Arbor context/domain decomposition and why it was selected.
 10. The embodied loop runs through sensory input -> CNS -> motor output -> MuJoCo physics -> sensory feedback.
-11. Viewer output is synchronized with simulation time and can inspect whole-CNS, neuron, and synapse-level state without duplicating the raw dataset unnecessarily.
+11. Rerun Viewer output is synchronized with simulation time and can inspect whole-CNS, neuron, synapse, embodied-world, eye-input, and telemetry state without duplicating the raw dataset unnecessarily.
 
 ## Testing rules
 
