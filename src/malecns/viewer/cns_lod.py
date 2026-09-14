@@ -38,3 +38,20 @@ def soma_cloud_um(
             rgb[i] = _SUPERCLASS_RGB[sc]
     valid = np.isfinite(xyz).all(axis=1)
     return xyz[valid], rgb[valid]
+
+
+def morphology_line_strips(morph) -> np.ndarray:
+    """(n_seg, 2, 3) line strips in µm for Rerun LineStrips3D."""
+    prox = np.asarray(morph.segment_prox, dtype=np.float32)
+    dist = np.asarray(morph.segment_dist, dtype=np.float32)
+    if prox.size == 0:
+        return np.zeros((0, 2, 3), dtype=np.float32)
+    return np.stack([prox, dist], axis=1)
+
+
+def downsample_line_strips(strips: np.ndarray, max_seg: int = 4000) -> np.ndarray:
+    n = int(strips.shape[0])
+    if n <= max_seg:
+        return strips
+    idx = np.linspace(0, n - 1, max_seg, dtype=np.int64)
+    return strips[idx]

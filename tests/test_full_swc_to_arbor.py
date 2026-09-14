@@ -41,3 +41,14 @@ def test_native_swc_becomes_scaled_cable_cell() -> None:
     cell = recipe.cell_description(0)
     assert cell is not None
     assert Path(table_path("syn_partners")).is_file()
+
+
+@pytest.mark.data
+def test_published_extra_root_swc_is_kept() -> None:
+    swc = SKELETONS_DIR / "10009.swc"
+    if not swc.is_file():
+        pytest.skip("native SWC 10009.swc not present")
+    morph = load_scaled_morphology(swc)
+    assert morph.num_branches >= 1
+    assert morph.segment_prox.shape[0] >= 1
+    assert any("extra SWC roots" in n for n in morph.notes)

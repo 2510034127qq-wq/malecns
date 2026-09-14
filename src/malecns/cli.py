@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     mp = sub.add_parser("map-synapses", help="Map synaptic partners onto cable locations")
     mp.add_argument("--full", action="store_true")
+    mp.add_argument("--no-resume", action="store_true")
     mp.set_defaults(func=_cmd_map_synapses)
 
     sim = sub.add_parser("simulate", help="Instantiate the Arbor recipe and advance simulation time")
@@ -48,6 +49,27 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-spawn-viewer", action="store_false", dest="spawn_viewer")
     run.add_argument("--full", action="store_true", help="Use the complete local MaleCNS connectome")
     run.set_defaults(func=_cmd_run)
+
+    insp = sub.add_parser("inspect", help="Inspect one neuron by body ID")
+    insp.add_argument("--body-id", type=int, required=True)
+    insp.add_argument("--max-synapses", type=int, default=64)
+    insp.set_defaults(func=_cmd_inspect)
+
+    ctl = sub.add_parser("control", help="Live pause/resume/speed/inspect bridge (control.json)")
+    ctl.add_argument("--pause", action="store_true")
+    ctl.add_argument("--resume", action="store_true")
+    ctl.add_argument("--speed", type=float, default=None)
+    ctl.add_argument("--inspect-body-id", type=int, default=None)
+    ctl.set_defaults(func=_cmd_control)
+
+    acc = sub.add_parser("accept", help="Full-data GOAL acceptance: env, ingest, map, simulate, loop")
+    acc.add_argument("--t-final-ms", type=float, default=0.25)
+    acc.add_argument("--loop-ms", type=float, default=1.0)
+    acc.add_argument("--skip-map", action="store_true")
+    acc.add_argument("--skip-simulate", action="store_true")
+    acc.add_argument("--skip-loop", action="store_true")
+    acc.add_argument("--spawn-viewer", action="store_true")
+    acc.set_defaults(func=_cmd_accept)
 
     return parser
 
@@ -72,7 +94,7 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
 def _cmd_map_synapses(args: argparse.Namespace) -> int:
     from malecns.synapses.mapping import map_synapses
 
-    stats = map_synapses(full=bool(args.full))
+    stats = map_synapses(full=bool(args.full), resume=not bool(args.no_resume))
     print(json.dumps(stats.to_dict(), indent=2, default=str))
     return 0
 
@@ -93,6 +115,46 @@ def _cmd_run(args: argparse.Namespace) -> int:
         t_final_ms=float(args.t_final_ms),
         spawn_viewer=bool(args.spawn_viewer),
         full=bool(getattr(args, "full", False)),
+    )
+    print(json.dumps(report.to_dict(), indent=2, default=str))
+    return 0
+
+
+def _cmd_inspect(args: argparse.Namespace) -> int:
+    from malecns.inspect import inspect_body
+
+    report = inspect_body(int(args.body_id), max_synapses=int(args.max_synapses))
+    print(json.dumps(report.to_dict(), indent=2, default=str))
+    return 0
+
+
+def _cmd_control(args: argparse.Namespace) -> int:
+    from malecns.viewer.control import read_control, write_control
+
+    ctl = read_control()
+    if args.pause:
+        ctl.paused = True
+    if args.resume:
+        ctl.paused = False
+    if args.speed is not None:
+        ctl.speed = float(args.speed)
+    if args.inspect_body_id is not None:
+        ctl.inspect_body_id = int(args.inspect_body_id)
+    write_control(ctl)
+    print(json.dumps({"paused": ctl.paused, "speed": ctl.speed, "inspect_body_id": ctl.inspect_body_id}))
+    return 0
+
+
+def _cmd_accept(args: argparse.Namespace) -> int:
+    from malecns.acceptance import run_acceptance
+
+    report = run_acceptance(
+        t_final_ms=float(args.t_final_ms),
+        loop_ms=float(args.loop_ms),
+        do_map=not bool(args.skip_map),
+        do_simulate=not bool(args.skip_simulate),
+        do_loop=not bool(args.skip_loop),
+        spawn_viewer=bool(args.spawn_viewer),
     )
     print(json.dumps(report.to_dict(), indent=2, default=str))
     return 0

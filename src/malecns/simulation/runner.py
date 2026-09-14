@@ -13,6 +13,7 @@ from malecns.parameters.physiology import load_physiology
 from malecns.simulation.context import make_execution_context
 from malecns.simulation.recipe import MaleCNSRecipe, NetworkBundle, debug_two_cell_bundle
 from malecns.simulation.resources import gpu_memory_gb, rss_gb
+from malecns.synapses.partners import ensure_partner_store
 
 
 @dataclass
@@ -28,6 +29,12 @@ class SimReport:
     rss_gb: float
     vram_gb: float | None
     n_spikes: int
+    construction_s: float = 0.0
+    n_pathological: int = 0
+    n_unmapped: int = 0
+    n_stub: int = 0
+    residual_mean_um: float = 0.0
+    accounting: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,6 +55,7 @@ def _full_bundle(phys) -> NetworkBundle:
         n_gids=len(catalog),
         cache_dir=DATA_CACHE / "post_incidence",
     )
+    ensure_partner_store(incidence)
 
     def swc_for_gid(gid: int) -> Path | None:
         body_id = int(catalog.body_ids[int(gid)])
@@ -68,6 +76,9 @@ def _full_bundle(phys) -> NetworkBundle:
         notes=[
             "full published MaleCNS v1.0 bodies; no extra connectivity threshold",
             "missing SWC bodies receive an explicit stub cable and are counted",
+            f"post incidence indexed={int(incidence.offsets[-1])} "
+            f"missing_post={incidence.n_missing_post} missing_pre={incidence.n_missing_pre}",
+            "Partner rows whose post body is absent from annotations cannot attach to a cell; they are counted, not silently dropped.",
         ],
     )
 
@@ -103,6 +114,7 @@ def run_network(
 
     exec_ctx = make_execution_context(prefer_gpu=prefer_gpu)
     notes.extend(exec_ctx.notes)
+    t_build = time.perf_counter()
     try:
         _decomp, sim = _simulate(exec_ctx)
         mode = exec_ctx.mode
@@ -121,14 +133,18 @@ def run_network(
         notes.extend(exec_ctx.notes)
         _decomp, sim = _simulate(exec_ctx)
         mode = "multicore"
+    construction_s = time.perf_counter() - t_build
 
     sim.record(arbor.spike_recording.all)
     t0 = time.perf_counter()
     sim.run(float(t_final_ms) * arbor.units.ms, float(dt_ms) * arbor.units.ms)
     wall = time.perf_counter() - t0
     spikes = sim.spikes()
-    n_conn = int(recipe.accounting.get("n_explicit_synapses", 0))
-    notes.append(f"accounting={recipe.accounting}")
+    acc = dict(recipe.accounting)
+    n_conn = int(acc.get("n_explicit_synapses", 0))
+    resid_n = float(acc.get("residual_n", 0) or 0)
+    residual_mean = float(acc.get("residual_sum_um", 0.0) / resid_n) if resid_n else 0.0
+    notes.append(f"accounting={acc}")
     return SimReport(
         n_cells=int(recipe.num_cells()),
         n_connections=n_conn,
@@ -141,5 +157,11 @@ def run_network(
         rss_gb=rss_gb(),
         vram_gb=gpu_memory_gb(),
         n_spikes=len(spikes) if spikes is not None else 0,
+        construction_s=construction_s,
+        n_pathological=int(acc.get("n_pathological", 0)),
+        n_unmapped=int(acc.get("n_unmapped_sites", 0)),
+        n_stub=int(acc.get("n_stub_morphologies", 0)),
+        residual_mean_um=residual_mean,
+        accounting=acc,
         notes=notes,
     )

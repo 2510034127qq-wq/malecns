@@ -25,3 +25,12 @@ aerodynamics:
     value: 1.0
     provenance: ASSUMED
     source: "Quasi-steady drag coefficient in the same family. Explicit modeling assumption."
+
+neural_motor_map:
+  provenance: ASSUMED
+  source: >
+    Each vnc_motor/cb_motor/descending neuron is assigned to a MuJoCo actuator
+    from somaSide + somaNeuromere (T1/T2/T3 → L1/R1…) and type-name keywords
+    (Ti flexor → knee, Tr flexor → pitch, DLM/DVM → wing). Flexor/extensor
+    use opposite signs. This is an inspectable modeling map, not measured
+    muscle insertions. Written to data/cache/motor_map.json at run time.

@@ -21,6 +21,31 @@ def contact_forces(model, data) -> NDArray[np.float64]:
     return forces
 
 
+def named_contact_forces(model, data) -> dict[str, float]:
+    """Contact force magnitude keyed by geom name (tarsus, food, walls, ...)."""
+    import mujoco
+
+    n = max(int(data.ncon), 0)
+    out: dict[str, float] = {}
+    if n == 0:
+        return out
+    cbuf = np.zeros(6, dtype=np.float64)
+    id2name = {}
+    for i in range(model.ngeom):
+        try:
+            id2name[i] = str(model.geom(i).name)
+        except Exception:
+            id2name[i] = str(i)
+    for i in range(n):
+        mujoco.mj_contactForce(model, data, i, cbuf)
+        mag = float(np.linalg.norm(cbuf[:3]))
+        con = data.contact[i]
+        for gid in (int(con.geom1), int(con.geom2)):
+            name = id2name.get(gid, str(gid))
+            out[name] = out.get(name, 0.0) + mag
+    return out
+
+
 def proprioception(model, data) -> dict[str, NDArray[np.float64]]:
     return {
         "qpos": np.array(data.qpos, dtype=np.float64, copy=True),

@@ -27,6 +27,8 @@ class BodyCatalog:
     assigned_ol_hex1: NDArray[np.float64]
     assigned_ol_hex2: NDArray[np.float64]
     status: list[str | None]
+    soma_neuromere: list[str | None]
+    root_side: list[str | None]
     soma_xyz_native: NDArray[np.float64]
 
     def __len__(self) -> int:
@@ -95,5 +97,7 @@ def load_body_catalog() -> BodyCatalog:
         assigned_ol_hex1=hex1,
         assigned_ol_hex2=hex2,
         status=_string_col(ann, "status", n),
+        soma_neuromere=_string_col(ann, "somaNeuromere", n),
+        root_side=_string_col(ann, "rootSide", n),
         soma_xyz_native=_soma_xyz(ann, n),
     )

@@ -1,4 +1,4 @@
-"""Rerun Viewer blueprint: world, MaleCNS, eyes, telemetry on one timeline."""
+"""Rerun Viewer blueprint: world, MaleCNS, eyes, telemetry, inspect on one timeline."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ def malecns_blueprint():
         Horizontal,
         Spatial2DView,
         Spatial3DView,
+        TextDocumentView,
         TimeSeriesView,
         Vertical,
     )
@@ -22,9 +23,14 @@ def malecns_blueprint():
             Horizontal(
                 Spatial2DView(name="Left eye", origin="eyes/left"),
                 Spatial2DView(name="Right eye", origin="eyes/right"),
-                TimeSeriesView(name="Telemetry", origin="telemetry"),
+                Spatial2DView(name="Left compound", origin="eyes/compound_left"),
+                Spatial2DView(name="Right compound", origin="eyes/compound_right"),
             ),
-            row_shares=[3, 2],
+            Horizontal(
+                TimeSeriesView(name="Telemetry", origin="telemetry"),
+                TextDocumentView(name="Inspect", origin="inspect"),
+            ),
+            row_shares=[3, 2, 2],
         ),
         collapse_panels=False,
     )

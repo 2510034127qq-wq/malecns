@@ -17,6 +17,7 @@ from malecns.synapses.partners import PostIncidence, build_post_incidence, iter_
 from malecns.units import MALE_CNS_UNITS_TO_UM
 
 NT_KEYS = ("acetylcholine", "gaba", "glutamate", "histamine", "unknown")
+_LOCSET_CHUNK = 256
 
 
 @dataclass
@@ -29,17 +30,24 @@ class NetworkBundle:
     incidence: PostIncidence | None
     residual_limit_um: float
     notes: list[str] = field(default_factory=list)
+    nt_codes: np.ndarray | None = None
+    sorted_bodies: np.ndarray | None = None
+    sorted_gids: np.ndarray | None = None
 
 
 @dataclass
 class CellWiring:
     morph: ScaledMorphology
-    locsets: dict[str, str]
+    locsets: list[tuple[str, str, str]]
     connections: list[object]
     n_post: int
     n_pathological: int
     n_unmapped: int
+    n_dropped_pre: int
+    residual_sum: float
+    residual_n: int
     stub: bool
+    swc_error: bool = False
 
 
 def nt_key(name: str | None) -> str:
@@ -48,13 +56,49 @@ def nt_key(name: str | None) -> str:
     key = str(name).strip().lower()
     if key in NT_KEYS:
         return key
-    if key in {"ach", "aCh", "choline"}:
+    if key in {"ach", "acholine", "choline"}:
         return "acetylcholine"
     return "unknown"
 
 
+def nt_code(name: str | None) -> int:
+    key = nt_key(name)
+    try:
+        return NT_KEYS.index(key)
+    except ValueError:
+        return NT_KEYS.index("unknown")
+
+
+def encode_nt_codes(names: Sequence[str | None]) -> np.ndarray:
+    return np.fromiter((nt_code(n) for n in names), dtype=np.int8, count=len(names))
+
+
+def _prepare_lookups(bundle: NetworkBundle) -> None:
+    if bundle.nt_codes is None:
+        bundle.nt_codes = encode_nt_codes(bundle.consensus_nt)
+    if bundle.sorted_bodies is None:
+        bodies = np.fromiter(bundle.gid_of.keys(), dtype=np.int64, count=len(bundle.gid_of))
+        gids = np.fromiter(bundle.gid_of.values(), dtype=np.int64, count=len(bundle.gid_of))
+        order = np.argsort(bodies)
+        bundle.sorted_bodies = bodies[order]
+        bundle.sorted_gids = gids[order]
+
+
+def _lookup_gids(bodies: np.ndarray, sorted_bodies: np.ndarray, sorted_gids: np.ndarray) -> np.ndarray:
+    pos = np.searchsorted(sorted_bodies, bodies)
+    n = int(sorted_bodies.size)
+    ok = pos < n
+    clipped = np.minimum(pos, max(n - 1, 0))
+    if n:
+        ok &= sorted_bodies[clipped] == bodies
+    gids = np.full(bodies.shape[0], -1, dtype=np.int64)
+    if n:
+        gids[ok] = sorted_gids[pos[ok]]
+    return gids
+
+
 def _locset(branches: np.ndarray, pos: np.ndarray) -> str:
-    terms = [f"(location {int(b)} {float(p):.9f})" for b, p in zip(branches, pos, strict=True)]
+    terms = [f"(location {int(b)} {float(p):.6f})" for b, p in zip(branches, pos, strict=True)]
     if not terms:
         return ""
     if len(terms) == 1:
@@ -62,18 +106,13 @@ def _locset(branches: np.ndarray, pos: np.ndarray) -> str:
     return "(sum " + " ".join(terms) + ")"
 
 
-def _delay_ms(
-    xyz_pre_native: np.ndarray,
-    xyz_post_native: np.ndarray,
-    phys: Physiology,
-) -> float:
+def _delays_ms(xyz_pre_native: np.ndarray, xyz_post_native: np.ndarray, phys: Physiology) -> np.ndarray:
     delta = (xyz_pre_native - xyz_post_native) * MALE_CNS_UNITS_TO_UM
-    dist_um = float(np.linalg.norm(delta))
+    dist_um = np.linalg.norm(delta, axis=1)
     dist_m = dist_um * 1e-6
     v = float(phys.conduction_m_per_s.value)
-    t_cond_ms = (dist_m / max(v, 1e-9)) * 1000.0
-    delay = t_cond_ms + float(phys.synaptic_delay_ms.value)
-    return max(delay, float(phys.min_delay_ms.value))
+    delay = (dist_m / max(v, 1e-9)) * 1000.0 + float(phys.synaptic_delay_ms.value)
+    return np.maximum(delay, float(phys.min_delay_ms.value))
 
 
 def debug_two_cell_bundle(workdir: Path, phys: Physiology) -> NetworkBundle:
@@ -114,6 +153,9 @@ def debug_two_cell_bundle(workdir: Path, phys: Physiology) -> NetworkBundle:
         incidence=incidence,
         residual_limit_um=float(phys.residual_limit_um.value),
         notes=["debug two-cell network; not the published MaleCNS connectome"],
+        nt_codes=np.array([0, 0], dtype=np.int8),
+        sorted_bodies=np.array([10, 11], dtype=np.int64),
+        sorted_gids=np.array([0, 1], dtype=np.int64),
     )
 
 
@@ -123,10 +165,13 @@ class MaleCNSRecipe:
     def __new__(cls, bundle: NetworkBundle, phys: Physiology, sensory_events=None):
         import arbor
 
+        from malecns.simulation.resources import rss_gb
+
         phys_ref = phys
         bundle_ref = bundle
-        cache: dict[int, CellWiring] = {}
+        _prepare_lookups(bundle_ref)
         sensory = sensory_events or {}
+        last: dict[str, object] = {"gid": None, "wiring": None}
 
         class _Recipe(arbor.recipe):
             def __init__(self) -> None:
@@ -138,10 +183,16 @@ class MaleCNSRecipe:
                 )
                 self.accounting = {
                     "n_stub_morphologies": 0,
+                    "n_swc_errors": 0,
                     "n_explicit_synapses": 0,
                     "n_pathological": 0,
                     "n_unmapped_sites": 0,
+                    "n_dropped_pre": 0,
+                    "n_cells_wired": 0,
+                    "residual_sum_um": 0.0,
+                    "residual_n": 0,
                 }
+                self._counted: set[int] = set()
 
             def num_cells(self) -> int:
                 return int(self.bundle.n_cells)
@@ -172,12 +223,10 @@ class MaleCNSRecipe:
                 ]
 
             def connections_on(self, gid: int):
-                wiring = self._wiring(int(gid))
-                return list(wiring.connections)
+                return list(self._wiring(int(gid)).connections)
 
             def cell_description(self, gid: int):
-                wiring = self._wiring(int(gid))
-                return self._cable_cell(wiring)
+                return self._cable_cell(self._wiring(int(gid)))
 
             def _cable_cell(self, wiring: CellWiring):
                 U = arbor.units
@@ -199,9 +248,9 @@ class MaleCNSRecipe:
                 )
                 unk = nt_key("unknown")
                 decor.place("(location 0 0)", self._synapse(unk), "sensory_in")
-                for nt, locset in wiring.locsets.items():
+                for label, locset, nt in wiring.locsets:
                     if locset:
-                        decor.place(locset, self._synapse(nt), f"post_{nt}")
+                        decor.place(locset, self._synapse(nt), label)
                 return arbor.cable_cell(
                     wiring.morph.morphology,
                     decor,
@@ -215,21 +264,56 @@ class MaleCNSRecipe:
                 return arbor.synapse("expsyn", {"tau": tau, "e": e_rev})
 
             def _wiring(self, gid: int) -> CellWiring:
-                if gid in cache:
-                    return cache[gid]
+                if last["gid"] == gid and last["wiring"] is not None:
+                    return last["wiring"]  # type: ignore[return-value]
+                wiring = self._build_wiring(gid)
+                last["gid"] = gid
+                last["wiring"] = wiring
+                if gid not in self._counted:
+                    self._counted.add(gid)
+                    acc = self.accounting
+                    acc["n_cells_wired"] += 1
+                    acc["n_explicit_synapses"] += len(wiring.connections)
+                    acc["n_pathological"] += wiring.n_pathological
+                    acc["n_unmapped_sites"] += wiring.n_unmapped
+                    acc["n_dropped_pre"] += wiring.n_dropped_pre
+                    acc["residual_sum_um"] += wiring.residual_sum
+                    acc["residual_n"] += wiring.residual_n
+                    if wiring.stub:
+                        acc["n_stub_morphologies"] += 1
+                    if wiring.swc_error:
+                        acc["n_swc_errors"] += 1
+                    n_wired = acc["n_cells_wired"]
+                    if n_wired % 200 == 0 or n_wired == self.bundle.n_cells:
+                        print(
+                            f"[malecns] recipe cells {n_wired}/{self.bundle.n_cells} "
+                            f"syn={acc['n_explicit_synapses']} rss={rss_gb():.2f}GB",
+                            flush=True,
+                        )
+                return wiring
+
+            def _build_wiring(self, gid: int) -> CellWiring:
                 path = self.bundle.swc_for_gid(gid)
                 stub = False
+                swc_error = False
                 if path is None or not Path(path).is_file():
                     stub = True
-                    self.accounting["n_stub_morphologies"] += 1
                     morph = _stub_morphology()
                 else:
-                    morph = load_scaled_morphology(path)
-                locsets: dict[str, str] = {}
+                    try:
+                        morph = load_scaled_morphology(path)
+                    except Exception:
+                        stub = True
+                        swc_error = True
+                        morph = _stub_morphology()
+                locsets: list[tuple[str, str, str]] = []
                 connections: list[object] = []
                 n_post = 0
                 n_path = 0
                 n_unmap = 0
+                n_dropped_pre = 0
+                residual_sum = 0.0
+                residual_n = 0
                 if self.bundle.incidence is not None:
                     rows = iter_partners_for_gid(self.bundle.incidence, gid)
                     n_post = int(rows["body_pre"].size)
@@ -243,63 +327,87 @@ class MaleCNSRecipe:
                         )
                         n_path = int(flags.pathological.sum())
                         n_unmap = int(flags.unmapped.sum())
-                        pre_nt = []
-                        for b in rows["body_pre"].tolist():
-                            pre_gid = self.bundle.gid_of.get(int(b))
-                            if pre_gid is None:
-                                pre_nt.append("unknown")
-                            else:
-                                pre_nt.append(nt_key(self.bundle.consensus_nt[pre_gid]))
+                        finite = np.isfinite(mapped.residual_um) & ~flags.unmapped.astype(bool)
+                        if np.any(finite):
+                            vals = mapped.residual_um[finite]
+                            residual_sum = float(vals.sum())
+                            residual_n = int(vals.size)
+                        branch = mapped.branch.copy()
+                        pos = mapped.pos.copy()
+                        bad = flags.unmapped.astype(bool) | (branch < 0) | ~np.isfinite(pos)
+                        branch[bad] = 0
+                        pos[bad] = 0.0
+                        np.clip(pos, 0.0, 1.0, out=pos)
+                        pre_gids = _lookup_gids(
+                            np.asarray(rows["body_pre"], dtype=np.int64),
+                            self.bundle.sorted_bodies,
+                            self.bundle.sorted_gids,
+                        )
+                        n_dropped_pre = int(np.count_nonzero(pre_gids < 0))
+                        codes = self.bundle.nt_codes
+                        pre_nt = np.full(n_post, NT_KEYS.index("unknown"), dtype=np.int8)
+                        ok_pre = pre_gids >= 0
+                        if codes is not None and np.any(ok_pre):
+                            pre_nt[ok_pre] = codes[pre_gids[ok_pre]]
                         xyz_pre = np.stack(
                             [rows["x_pre"], rows["y_pre"], rows["z_pre"]], axis=1
                         ).astype(np.float64)
-                        for nt in NT_KEYS:
-                            idx = np.array(
-                                [i for i, name in enumerate(pre_nt) if name == nt],
-                                dtype=np.int64,
-                            )
-                            if idx.size == 0:
-                                continue
-                            locsets[nt] = _locset(mapped.branch[idx], mapped.pos[idx])
-                            for i in idx.tolist():
-                                pre_body = int(rows["body_pre"][i])
-                                if pre_body not in self.bundle.gid_of:
-                                    continue
-                                pre_gid = self.bundle.gid_of[pre_body]
-                                delay = _delay_ms(xyz_pre[i], xyz[i], self.phys)
-                                connections.append(
-                                    arbor.connection(
-                                        arbor.cell_global_label(pre_gid, "src"),
-                                        arbor.cell_local_label(
-                                            f"post_{nt}",
-                                            arbor.selection_policy.round_robin,
-                                        ),
-                                        float(self.phys.unitary_weight.value),
-                                        delay * arbor.units.ms,
+                        delays = _delays_ms(xyz_pre, xyz, self.phys)
+                        weight = float(self.phys.unitary_weight.value)
+                        Ums = arbor.units.ms
+                        for nt_i, nt_name in enumerate(NT_KEYS):
+                            known = np.flatnonzero((pre_nt == nt_i) & (pre_gids >= 0))
+                            orphan = np.flatnonzero((pre_nt == nt_i) & (pre_gids < 0))
+                            if orphan.size:
+                                locsets.append(
+                                    (
+                                        f"orphan_{nt_name}",
+                                        _locset(branch[orphan], pos[orphan]),
+                                        nt_name,
                                     )
                                 )
-                        self.accounting["n_explicit_synapses"] += len(connections)
-                        self.accounting["n_pathological"] += n_path
-                        self.accounting["n_unmapped_sites"] += n_unmap
-                wiring = CellWiring(
+                            for c0 in range(0, known.size, _LOCSET_CHUNK):
+                                sl = known[c0 : c0 + _LOCSET_CHUNK]
+                                label = f"post_{nt_name}_{c0}"
+                                locsets.append((label, _locset(branch[sl], pos[sl]), nt_name))
+                                for i in sl.tolist():
+                                    connections.append(
+                                        arbor.connection(
+                                            arbor.cell_global_label(int(pre_gids[i]), "src"),
+                                            arbor.cell_local_label(
+                                                label, arbor.selection_policy.round_robin
+                                            ),
+                                            weight,
+                                            float(delays[i]) * Ums,
+                                        )
+                                    )
+                return CellWiring(
                     morph=morph,
                     locsets=locsets,
                     connections=connections,
                     n_post=n_post,
                     n_pathological=n_path,
                     n_unmapped=n_unmap,
+                    n_dropped_pre=n_dropped_pre,
+                    residual_sum=residual_sum,
+                    residual_n=residual_n,
                     stub=stub,
+                    swc_error=swc_error,
                 )
-                cache[gid] = wiring
-                return wiring
 
         recipe = _Recipe()
         recipe.__dict__["_malecns_bundle"] = bundle
         return recipe
 
 
+_STUB: ScaledMorphology | None = None
+
+
 def _stub_morphology() -> ScaledMorphology:
     """Placeholder cable when an annotation has no SWC. Counted, not silent."""
+    global _STUB
+    if _STUB is not None:
+        return _STUB
     import tempfile
 
     with tempfile.NamedTemporaryFile("w", suffix=".swc", delete=False) as handle:
@@ -308,6 +416,7 @@ def _stub_morphology() -> ScaledMorphology:
     try:
         morph = load_scaled_morphology(path)
         morph.notes = morph.notes + ("missing SWC; stub cable used and counted",)
+        _STUB = morph
         return morph
     finally:
         path.unlink(missing_ok=True)

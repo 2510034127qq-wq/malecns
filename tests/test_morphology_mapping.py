@@ -60,3 +60,18 @@ def test_far_point_is_flagged_pathological_not_dropped(tmp_path: Path) -> None:
     assert flags.pathological[0] == 1
     assert flags.unmapped[0] == 0
     assert mapped.residual_um[0] > 10.0
+
+
+def test_extra_swc_roots_are_kept_not_dropped(tmp_path: Path) -> None:
+    swc = tmp_path / "1.swc"
+    swc.write_text(
+        "1 1 0 0 0 10 -1\n"
+        "2 3 1000 0 0 10 1\n"
+        "3 3 0 1000 0 10 -1\n"
+        "4 3 0 2000 0 10 3\n",
+        encoding="utf-8",
+    )
+    morph = load_scaled_morphology(swc)
+    assert morph.num_branches >= 2
+    assert morph.segment_prox.shape[0] >= 2
+    assert any("extra SWC roots" in n for n in morph.notes)
