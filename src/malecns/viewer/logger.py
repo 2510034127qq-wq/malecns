@@ -66,6 +66,11 @@ class Workbench:
         if ctrl.size:
             rr.log("telemetry/motor_rms", rr.Scalars(float(np.sqrt(np.mean(ctrl * ctrl)))))
 
-    def log_cns_lines(self, entity: str, strips: np.ndarray) -> None:
-        """Line strips in micrometers; call once per inspected neuron or LOD set."""
-        self.rr.log(entity, self.rr.LineStrips3D(strips), static=True)
+    def log_cns_somas(self, xyz_um, rgb) -> None:
+        if xyz_um is None or len(xyz_um) == 0:
+            return
+        self.rr.log(
+            "cns/somas",
+            self.rr.Points3D(positions=xyz_um, colors=rgb, radii=2.0),
+            static=True,
+        )

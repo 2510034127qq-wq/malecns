@@ -130,6 +130,17 @@ def run_closed_loop(
 
     viewer = Workbench(spawn=spawn_viewer)
     viewer.log_static_world(model)
+    if full:
+        try:
+            from malecns.data.catalog import load_body_catalog
+            from malecns.viewer.cns_lod import soma_cloud_um
+
+            catalog = load_body_catalog()
+            xyz, rgb = soma_cloud_um(catalog.soma_xyz_native, catalog.superclass)
+            viewer.log_cns_somas(xyz, rgb)
+            notes.append(f"logged {len(xyz)} soma points in µm to Rerun")
+        except Exception as exc:
+            notes.append(f"CNS soma LOD skipped: {exc}")
 
     n_steps = int(max(t_final_ms / physics_dt_ms, 1))
     first_senses = None

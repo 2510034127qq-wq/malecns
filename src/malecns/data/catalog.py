@@ -27,6 +27,7 @@ class BodyCatalog:
     assigned_ol_hex1: NDArray[np.float64]
     assigned_ol_hex2: NDArray[np.float64]
     status: list[str | None]
+    soma_xyz_native: NDArray[np.float64]
 
     def __len__(self) -> int:
         return int(self.body_ids.size)
@@ -39,6 +40,18 @@ def _string_col(table: pa.Table, name: str, n: int) -> list[str | None]:
     if name not in table.column_names:
         return [None] * n
     return [None if v is None else str(v) for v in table[name].to_pylist()]
+
+
+def _soma_xyz(table: pa.Table, n: int) -> np.ndarray:
+    out = np.full((n, 3), np.nan, dtype=np.float64)
+    if "somaLocation" not in table.column_names:
+        return out
+    for i, val in enumerate(table["somaLocation"].to_pylist()):
+        if val is not None and len(val) >= 3:
+            out[i, 0] = float(val[0])
+            out[i, 1] = float(val[1])
+            out[i, 2] = float(val[2])
+    return out
 
 
 def load_body_catalog() -> BodyCatalog:
@@ -82,4 +95,5 @@ def load_body_catalog() -> BodyCatalog:
         assigned_ol_hex1=hex1,
         assigned_ol_hex2=hex2,
         status=_string_col(ann, "status", n),
+        soma_xyz_native=_soma_xyz(ann, n),
     )
