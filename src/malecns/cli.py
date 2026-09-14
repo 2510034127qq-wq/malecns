@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--t-final-ms", type=float, default=100.0)
     run.add_argument("--spawn-viewer", action="store_true", default=True)
     run.add_argument("--no-spawn-viewer", action="store_false", dest="spawn_viewer")
+    run.add_argument("--full", action="store_true", help="Use the complete local MaleCNS connectome")
     run.set_defaults(func=_cmd_run)
 
     return parser
@@ -91,6 +92,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         experiment=str(args.experiment),
         t_final_ms=float(args.t_final_ms),
         spawn_viewer=bool(args.spawn_viewer),
+        full=bool(getattr(args, "full", False)),
     )
     print(json.dumps(report.to_dict(), indent=2, default=str))
     return 0

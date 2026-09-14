@@ -1,0 +1,27 @@
+body:
+  mass_kg:
+    value: 1.0e-6
+    provenance: LITERATURE_DERIVED
+    source: "Adult Drosophila mass is about 1 mg (Lehmann & Dickinson 1997)."
+  length_m:
+    value: 0.0025
+    provenance: LITERATURE_DERIVED
+    source: "Adult body length ~2.5 mm. Segment lengths follow the NeuroMechFly morphological plan (Lobato-Rios et al. 2022) as a literature template, not a copied asset."
+
+aerodynamics:
+  rho_air:
+    value: 1.184
+    provenance: LITERATURE_DERIVED
+    source: "Dry air density near 25 C."
+  wing_area_m2:
+    value: 2.0e-6
+    provenance: LITERATURE_DERIVED
+    source: "Order-of-magnitude Drosophila wing area (Lehmann & Dickinson 1997; Sane 2003)."
+  CL:
+    value: 1.5
+    provenance: ASSUMED
+    source: "Quasi-steady lift coefficient in the Dickinson, Lehmann & Sane 1999 range. Not measured for this MuJoCo wing geom."
+  CD:
+    value: 1.0
+    provenance: ASSUMED
+    source: "Quasi-steady drag coefficient in the same family. Explicit modeling assumption."
